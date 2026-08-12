@@ -1,0 +1,17 @@
+# SSH keys and secrets
+*.pem
+*.key
+id_rsa
+id_ed25519
+secrets.yaml
+*.secret
+
+# Ansible temporary files
+*.retry
+*.log
+
+# Editor and system files
+.vscode/
+.idea/
+*.swp
+.DS_Store
