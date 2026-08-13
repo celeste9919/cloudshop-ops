@@ -1,0 +1,18 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: cloudshop-ci-test
+  namespace: cloudshop-ci
+spec:
+  ingressClassName: nginx  # 指定由 ingress-nginx 控制器处理
+  rules:
+    - host: ci.cloudshop.local  # 测试域名
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: cloudshop-ci-test  # 后端 Kubernetes Service
+                port:
+                  number: 80  # Service 端口
