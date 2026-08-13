@@ -31,7 +31,7 @@ build-and-push-image:
     - docker push "$IMAGE"
     - docker logout 172.25.254.105
 
-kubernetes-deploy-verify:
+deploy-to-kubernetes:
   stage: deploy
   image:
     name: bitnami/kubectl:latest
@@ -40,5 +40,7 @@ kubernetes-deploy-verify:
     - infra-docker
   script:
     - export KUBECONFIG=/tmp/cloudshop-kubeconfig
-    - kubectl get deployment cloudshop-ci-test -n cloudshop-ci
+    - export IMAGE="172.25.254.105/cloudshop/cloudshop-ci-test:${CI_COMMIT_SHORT_SHA}"
+    - kubectl set image deployment/cloudshop-ci-test nginx="$IMAGE" -n cloudshop-ci
     - kubectl rollout status deployment/cloudshop-ci-test -n cloudshop-ci --timeout=120s
+    - kubectl get deployment cloudshop-ci-test -n cloudshop-ci -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'
