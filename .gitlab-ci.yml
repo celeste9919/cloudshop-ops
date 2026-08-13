@@ -1,0 +1,11 @@
+stages:
+  - verify
+
+runner-docker-verify:
+  stage: verify
+  tags:
+    - infra-docker
+  script:
+    - echo "Runner: ${CI_RUNNER_DESCRIPTION}"
+    - docker version
+    - docker info
