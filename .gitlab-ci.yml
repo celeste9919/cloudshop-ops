@@ -9,3 +9,11 @@ runner-docker-verify:
     - 'echo "Runner: ${CI_RUNNER_DESCRIPTION}"'
     - docker version
     - docker info
+
+harbor-auth-verify:
+  stage: verify
+  tags:
+    - infra-docker
+  script:
+    - echo "$HARBOR_PASSWORD" | docker login --username "$HARBOR_USER" --password-stdin 172.25.254.105
+    - docker logout 172.25.254.105
