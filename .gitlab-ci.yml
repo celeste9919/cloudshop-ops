@@ -1,6 +1,7 @@
 stages:
   - verify
   - build
+  - deploy
 
 runner-docker-verify:
   stage: verify
@@ -29,3 +30,14 @@ build-and-push-image:
     - docker build -t "$IMAGE" cicd/image-test
     - docker push "$IMAGE"
     - docker logout 172.25.254.105
+
+kubernetes-deploy-verify:
+  stage: deploy
+  image:
+    name: bitnami/kubectl:latest
+    entrypoint: [""]
+  tags:
+    - infra-docker
+  script:
+    - kubectl get deployment cloudshop-ci-test -n cloudshop-ci
+    - kubectl rollout status deployment/cloudshop-ci-test -n cloudshop-ci --timeout=120s
