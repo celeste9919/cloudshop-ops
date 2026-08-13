@@ -39,5 +39,6 @@ kubernetes-deploy-verify:
   tags:
     - infra-docker
   script:
+    - export KUBECONFIG=/tmp/cloudshop-kubeconfig
     - kubectl get deployment cloudshop-ci-test -n cloudshop-ci
     - kubectl rollout status deployment/cloudshop-ci-test -n cloudshop-ci --timeout=120s
