@@ -1,0 +1,25 @@
+alertmanager:
+  config:
+    global:
+      resolve_timeout: 5m
+    route:
+      receiver: dingtalk-cloudshop
+      group_by:
+        - alertname
+        - namespace
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+      routes:
+        - receiver: 'null'
+          matchers:
+            - alertname="Watchdog"
+        - receiver: 'null'
+          matchers:
+            - alertname="InfoInhibitor"
+    receivers:
+      - name: 'null'
+      - name: dingtalk-cloudshop
+        webhook_configs:
+          - url: 'http://prometheus-webhook-dingtalk.monitoring.svc.cluster.local:8060/dingtalk/cloudshop/send'
+            send_resolved: true
