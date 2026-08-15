@@ -69,6 +69,8 @@ apiVersion: v1
 kind: Service
 metadata:
   name: cloudshop-api
+  labels:
+    app: cloudshop-api
   namespace: cloudshop-app
 spec:
   selector:
