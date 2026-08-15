@@ -44,3 +44,30 @@ deploy-to-kubernetes:
     - kubectl set image deployment/cloudshop-ci-test nginx="$IMAGE" -n cloudshop-ci
     - kubectl rollout status deployment/cloudshop-ci-test -n cloudshop-ci --timeout=120s
     - kubectl get deployment cloudshop-ci-test -n cloudshop-ci -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'
+
+build-cloudshop-api:
+  stage: build
+  tags:
+    - infra-docker
+  script:
+    - export IMAGE="172.25.254.105/cloudshop/cloudshop-api:${CI_COMMIT_SHORT_SHA}"
+    - echo "$HARBOR_PASSWORD" | docker login --username "$HARBOR_USER" --password-stdin 172.25.254.105
+    - docker build -t "$IMAGE" apps/cloudshop-api
+    - docker push "$IMAGE"
+    - docker logout 172.25.254.105
+
+deploy-cloudshop-api:
+  stage: deploy
+  image:
+    name: bitnami/kubectl:latest
+    entrypoint: [""]
+  tags:
+    - infra-docker
+  needs:
+    - build-cloudshop-api
+  script:
+    - export KUBECONFIG=/tmp/cloudshop-kubeconfig
+    - export IMAGE="172.25.254.105/cloudshop/cloudshop-api:${CI_COMMIT_SHORT_SHA}"
+    - kubectl set image deployment/cloudshop-api cloudshop-api="$IMAGE" -n cloudshop-app
+    - kubectl rollout status deployment/cloudshop-api -n cloudshop-app --timeout=180s
+    - kubectl get deployment cloudshop-api -n cloudshop-app -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'

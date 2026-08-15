@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: cloudshop-mysql-recovery-pv
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  nfs:
+    server: 172.25.254.105
+    path: /data/nfs/k8s/cloudshop-data-mysql-data-mysql-0-pvc-07b723cb-ed3c-4ddd-a490-be24c9146a55
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-data-mysql-0
+  namespace: cloudshop-data
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: ""
+  volumeName: cloudshop-mysql-recovery-pv
+  resources:
+    requests:
+      storage: 10Gi

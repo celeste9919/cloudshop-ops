@@ -15,3 +15,11 @@ secrets.yaml
 .idea/
 *.swp
 .DS_Store
+
+# Local recovery, backup, and generated artifacts
+charts/
+monitoring/kube-prometheus-values.yaml.bak
+monitoring/dingtalk-webhook.yaml
+kubernetes/middleware/mysql-password-recovery.yaml
+kubernetes/middleware/mysql.yaml
+kubernetes/middleware/redis-statefulset.yaml
