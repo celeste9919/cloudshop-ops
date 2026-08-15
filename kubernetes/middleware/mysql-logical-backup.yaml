@@ -1,0 +1,77 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-logical-backups
+  namespace: cloudshop-data
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: nfs-client
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: mysql-logical-backup
+  namespace: cloudshop-data
+spec:
+  schedule: "30 3 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: backup
+              image: mysql:8.4
+              imagePullPolicy: IfNotPresent
+              command:
+                - /bin/sh
+                - -ec
+                - |
+                  umask 077
+                  timestamp="$(date +%Y%m%d-%H%M%S)"
+                  final="/backups/cloudshop-${timestamp}.sql.gz"
+                  temp="${final}.part"
+                  sql="${final%.gz}.part"
+                  trap 'rm -f "$sql" "$temp"' EXIT
+                  mysqldump \
+                    --host=mysql.cloudshop-data.svc.cluster.local \
+                    --port=3306 \
+                    --user=cloudshop \
+                    --single-transaction \
+                    --routines \
+                    --events \
+                    --triggers \
+                    --no-tablespaces \
+                    --set-gtid-purged=OFF \
+                    --databases cloudshop > "${sql}"
+                  gzip -c "${sql}" > "${temp}"
+                  rm -f "${sql}"
+                  gzip -t "${temp}"
+                  mv "${temp}" "${final}"
+                  (
+                    cd /backups
+                    sha256sum "$(basename "${final}")"
+                  ) > "${final}.sha256"
+                  find /backups -type f -name 'cloudshop-*.sql.gz' -mtime +14 -delete
+                  find /backups -type f -name 'cloudshop-*.sql.gz.sha256' -mtime +14 -delete
+              env:
+                - name: MYSQL_PWD
+                  valueFrom:
+                    secretKeyRef:
+                      name: cloudshop-db-secret
+                      key: MYSQL_PASSWORD
+              volumeMounts:
+                - name: backups
+                  mountPath: /backups
+          volumes:
+            - name: backups
+              persistentVolumeClaim:
+                claimName: mysql-logical-backups
