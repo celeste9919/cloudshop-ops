@@ -1,8 +1,24 @@
 const express = require("express");
 const mysql = require("mysql2/promise");
 const { createClient } = require("redis");
+const client = require("prom-client");
 
 const port = Number(process.env.PORT || 8080);
+const metricsRegistry = new client.Registry();
+
+client.collectDefaultMetrics({
+  register: metricsRegistry,
+  prefix: "cloudshop_api_"
+});
+
+const httpRequestDuration = new client.Histogram({
+  name: "cloudshop_api_http_request_duration_seconds",
+  help: "CloudShop API HTTP request duration in seconds",
+  labelNames: ["method", "status_code"],
+  buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5],
+  registers: [metricsRegistry]
+});
+
 const mysqlPool = mysql.createPool({
   host: process.env.MYSQL_HOST,
   port: Number(process.env.MYSQL_PORT || 3306),
@@ -67,6 +83,22 @@ async function start() {
   const app = express();
   app.use(express.json());
 
+  app.use((request, response, next) => {
+    if (request.path === "/metrics") {
+      next();
+      return;
+    }
+
+    const stopTimer = httpRequestDuration.startTimer();
+    response.on("finish", () => {
+      stopTimer({
+        method: request.method,
+        status_code: response.statusCode
+      });
+    });
+    next();
+  });
+
   app.get("/healthz", (_request, response) => {
     response.status(200).json({ status: "ok" });
   });
@@ -76,6 +108,15 @@ async function start() {
       await mysqlPool.query("SELECT 1");
       await redis.ping();
       response.status(200).json({ status: "ready" });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/metrics", async (_request, response, next) => {
+    try {
+      response.set("Content-Type", metricsRegistry.contentType);
+      response.end(await metricsRegistry.metrics());
     } catch (error) {
       next(error);
     }
