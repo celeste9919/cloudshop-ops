@@ -42,8 +42,8 @@ deploy-to-kubernetes:
   script:
     - export KUBECONFIG=/tmp/cloudshop-kubeconfig
     - export IMAGE="172.25.254.105/cloudshop/cloudshop-ci-test:${CI_COMMIT_SHORT_SHA}"
-    - export LATEST_SHA="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
-    - if [ "$LATEST_SHA" != "$CI_COMMIT_SHA" ]; then echo "Skipping superseded commit $CI_COMMIT_SHA; main is $LATEST_SHA"; exit 0; fi
+    - export LATEST_SHA="$(git ls-remote origin refs/heads/main 2>/dev/null | awk '{print $1}')"
+    - if [ -n "$LATEST_SHA" ] && [ "$LATEST_SHA" != "$CI_COMMIT_SHA" ]; then echo "Skipping superseded commit $CI_COMMIT_SHA; main is $LATEST_SHA"; exit 0; fi
     - kubectl set image deployment/cloudshop-ci-test nginx="$IMAGE" -n cloudshop-ci
     - kubectl rollout status deployment/cloudshop-ci-test -n cloudshop-ci --timeout=120s
     - kubectl get deployment cloudshop-ci-test -n cloudshop-ci -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'
@@ -72,8 +72,8 @@ deploy-cloudshop-api:
   script:
     - export KUBECONFIG=/tmp/cloudshop-kubeconfig
     - export IMAGE="172.25.254.105/cloudshop/cloudshop-api:${CI_COMMIT_SHORT_SHA}"
-    - export LATEST_SHA="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
-    - if [ "$LATEST_SHA" != "$CI_COMMIT_SHA" ]; then echo "Skipping superseded commit $CI_COMMIT_SHA; main is $LATEST_SHA"; exit 0; fi
+    - export LATEST_SHA="$(git ls-remote origin refs/heads/main 2>/dev/null | awk '{print $1}')"
+    - if [ -n "$LATEST_SHA" ] && [ "$LATEST_SHA" != "$CI_COMMIT_SHA" ]; then echo "Skipping superseded commit $CI_COMMIT_SHA; main is $LATEST_SHA"; exit 0; fi
     - kubectl set image deployment/cloudshop-api cloudshop-api="$IMAGE" -n cloudshop-app
     - kubectl rollout status deployment/cloudshop-api -n cloudshop-app --timeout=180s
     - kubectl get deployment cloudshop-api -n cloudshop-app -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'
