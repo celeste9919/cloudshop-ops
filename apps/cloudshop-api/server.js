@@ -4,6 +4,8 @@ const { createClient } = require("redis");
 const client = require("prom-client");
 
 const port = Number(process.env.PORT || 8080);
+const startupRetryAttempts = Number(process.env.STARTUP_RETRY_ATTEMPTS || 12);
+const startupRetryDelayMs = Number(process.env.STARTUP_RETRY_DELAY_MS || 5000);
 const metricsRegistry = new client.Registry();
 
 client.collectDefaultMetrics({
@@ -62,6 +64,46 @@ async function initializeDatabase() {
   }
 }
 
+function sleep(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function initializeDependencies() {
+  let lastError;
+
+  for (let attempt = 1; attempt <= startupRetryAttempts; attempt += 1) {
+    try {
+      if (!redis.isReady) {
+        if (redis.isOpen) {
+          redis.disconnect();
+        }
+        await redis.connect();
+      }
+
+      await initializeDatabase();
+      console.log(`CloudShop dependencies ready on attempt ${attempt}`);
+      return;
+    } catch (error) {
+      lastError = error;
+      console.error(
+        `CloudShop dependency initialization failed on attempt ${attempt}/${startupRetryAttempts}:`,
+        error.message
+      );
+
+      if (redis.isOpen && !redis.isReady) {
+        redis.disconnect();
+      }
+
+      if (attempt < startupRetryAttempts) {
+        await sleep(startupRetryDelayMs);
+      }
+    }
+  }
+
+  throw lastError;
+}
+
+
 async function getProducts() {
   const cacheKey = "cloudshop:products:v1";
   const cached = await redis.get(cacheKey);
@@ -77,8 +119,7 @@ async function getProducts() {
 }
 
 async function start() {
-  await redis.connect();
-  await initializeDatabase();
+  await initializeDependencies();
 
   const app = express();
   app.use(express.json());
