@@ -1,0 +1,153 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cloudshop-api-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  cloudshop-api.json: |
+    {
+      "uid": "cloudshop-api",
+      "title": "CloudShop API",
+      "tags": ["cloudshop", "api", "kubernetes"],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "30s",
+      "time": {
+        "from": "now-1h",
+        "to": "now"
+      },
+      "templating": {
+        "list": []
+      },
+      "annotations": {
+        "list": []
+      },
+      "panels": [
+        {
+          "id": 1,
+          "type": "stat",
+          "title": "API Availability",
+          "gridPos": {"h": 5, "w": 6, "x": 0, "y": 0},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [
+            {
+              "expr": "avg(up{namespace=\"cloudshop-app\",service=\"cloudshop-api\"})",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "min": 0,
+              "max": 1,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "red", "value": null},
+                  {"color": "green", "value": 1}
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "orientation": "auto",
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto"
+          }
+        },
+        {
+          "id": 2,
+          "type": "timeseries",
+          "title": "Request Rate",
+          "gridPos": {"h": 8, "w": 9, "x": 6, "y": 0},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [
+            {
+              "expr": "sum by (status_code) (rate(cloudshop_api_http_request_duration_seconds_count{namespace=\"cloudshop-app\",service=\"cloudshop-api\"}[5m]))",
+              "legendFormat": "{{status_code}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {"unit": "reqps"},
+            "overrides": []
+          },
+          "options": {
+            "legend": {"displayMode": "list", "placement": "bottom"},
+            "tooltip": {"mode": "multi"}
+          }
+        },
+        {
+          "id": 3,
+          "type": "timeseries",
+          "title": "5xx Error Rate",
+          "gridPos": {"h": 8, "w": 9, "x": 15, "y": 0},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [
+            {
+              "expr": "sum(rate(cloudshop_api_http_request_duration_seconds_count{namespace=\"cloudshop-app\",service=\"cloudshop-api\",status_code=~\"5..\"}[5m])) / clamp_min(sum(rate(cloudshop_api_http_request_duration_seconds_count{namespace=\"cloudshop-app\",service=\"cloudshop-api\"}[5m])), 0.001)",
+              "legendFormat": "5xx ratio",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {"unit": "percentunit", "min": 0, "max": 1},
+            "overrides": []
+          },
+          "options": {
+            "legend": {"displayMode": "list", "placement": "bottom"},
+            "tooltip": {"mode": "single"}
+          }
+        },
+        {
+          "id": 4,
+          "type": "timeseries",
+          "title": "P95 Request Latency",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(cloudshop_api_http_request_duration_seconds_bucket{namespace=\"cloudshop-app\",service=\"cloudshop-api\"}[5m])))",
+              "legendFormat": "p95",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {"unit": "s"},
+            "overrides": []
+          },
+          "options": {
+            "legend": {"displayMode": "list", "placement": "bottom"},
+            "tooltip": {"mode": "single"}
+          }
+        },
+        {
+          "id": 5,
+          "type": "timeseries",
+          "title": "Resident Memory",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [
+            {
+              "expr": "sum by (pod) (cloudshop_api_process_resident_memory_bytes{namespace=\"cloudshop-app\",service=\"cloudshop-api\"})",
+              "legendFormat": "{{pod}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {"unit": "bytes"},
+            "overrides": []
+          },
+          "options": {
+            "legend": {"displayMode": "list", "placement": "bottom"},
+            "tooltip": {"mode": "multi"}
+          }
+        }
+      ]
+    }
