@@ -23,3 +23,6 @@ monitoring/dingtalk-webhook.yaml
 kubernetes/middleware/mysql-password-recovery.yaml
 kubernetes/middleware/mysql.yaml
 kubernetes/middleware/redis-statefulset.yaml
+
+# Local CI backup files
+.gitlab-ci.yml.bak-*
