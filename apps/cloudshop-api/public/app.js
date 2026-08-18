@@ -28,6 +28,11 @@ function escapeHtml(value) {
   })[character]);
 }
 
+function csrfHeaders(json = false) {
+  const token = document.cookie.split(";").map((part) => part.trim().split("=")).find(([key]) => key === "cloudshop_csrf")?.[1];
+  return { ...(json ? { "Content-Type": "application/json" } : {}), "X-CSRF-Token": token || "" };
+}
+
 function productCard(product) {
   const article = document.createElement("article");
   article.className = "product";
@@ -80,7 +85,7 @@ async function loadProducts() {
 async function adjustStock(id, quantity) {
   const response = await fetch(`/api/products/${id}/stock`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: csrfHeaders(true),
     body: JSON.stringify({ quantity })
   });
   if (!response.ok) {
@@ -97,7 +102,7 @@ authButton.addEventListener("click", async () => {
     authDialog.showModal();
     return;
   }
-  await fetch("/api/auth/logout", { method: "POST" });
+  await fetch("/api/auth/logout", { method: "POST", headers: csrfHeaders() });
   currentUser = null;
   authButton.textContent = "Sign in";
   addProductButton.disabled = true;
@@ -118,7 +123,7 @@ form.addEventListener("submit", async (event) => {
   if (!data.imageUrl) delete data.imageUrl;
   const response = await fetch("/api/products", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: csrfHeaders(true),
     body: JSON.stringify(data)
   });
   if (!response.ok) {

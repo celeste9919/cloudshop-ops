@@ -164,6 +164,10 @@ function verifyPassword(password, encoded) {
   return crypto.timingSafeEqual(Buffer.from(actual, "hex"), Buffer.from(expected, "hex"));
 }
 
+function toCents(value) {
+  return Math.round((Number(value) + Number.EPSILON) * 100);
+}
+
 function cookies(request) {
   return Object.fromEntries((request.headers.cookie || "").split(";").filter(Boolean).map((part) => {
     const index = part.indexOf("=");
@@ -195,17 +199,28 @@ async function requireUser(request, response, next) {
 }
 
 async function requireAdmin(request, response, next) {
-  await requireUser(request, response, (error) => {
-    if (error) {
-      next(error);
-      return;
-    }
-    if (request.user.role !== "admin") {
-      response.status(403).json({ error: "administrator access required" });
-      return;
-    }
+  await requireCsrf(request, response, (error) => {
+    if (error) return next(error);
+    if (request.user.role !== "admin") return response.status(403).json({ error: "administrator access required" });
     next();
   });
+}
+
+async function requireCsrf(request, response, next) {
+  try {
+    const user = await currentUser(request);
+    const sessionToken = cookies(request)[sessionCookie];
+    const csrfToken = cookies(request).cloudshop_csrf;
+    const expected = sessionToken ? await redis.get(`cloudshop:csrf:${sessionToken}`) : null;
+    if (!user) return response.status(401).json({ error: "authentication required" });
+    if (!csrfToken || !expected || csrfToken !== expected || request.get("x-csrf-token") !== expected) {
+      return response.status(403).json({ error: "csrf validation failed" });
+    }
+    request.user = user;
+    next();
+  } catch (error) {
+    next(error);
+  }
 }
 
 async function initializeDependencies() {
@@ -343,19 +358,27 @@ async function start() {
         return;
       }
       const token = crypto.randomBytes(32).toString("hex");
+      const csrfToken = crypto.randomBytes(32).toString("hex");
       await redis.setEx(`cloudshop:session:${token}`, sessionTtlSeconds, String(users[0].id));
-      response.setHeader("Set-Cookie", `${sessionCookie}=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Max-Age=${sessionTtlSeconds}; Path=/`);
+      await redis.setEx(`cloudshop:csrf:${token}`, sessionTtlSeconds, csrfToken);
+      response.setHeader("Set-Cookie", [
+        `${sessionCookie}=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Max-Age=${sessionTtlSeconds}; Path=/`,
+        `cloudshop_csrf=${csrfToken}; SameSite=Lax; Max-Age=${sessionTtlSeconds}; Path=/`
+      ]);
       response.status(200).json({ id: users[0].id, email: users[0].email, name: users[0].name, role: users[0].role });
     } catch (error) {
       next(error);
     }
   });
 
-  app.post("/api/auth/logout", async (request, response, next) => {
+  app.post("/api/auth/logout", requireCsrf, async (request, response, next) => {
     try {
       const token = cookies(request)[sessionCookie];
-      if (token) await redis.del(`cloudshop:session:${token}`);
-      response.setHeader("Set-Cookie", `${sessionCookie}=; HttpOnly; SameSite=Lax; Max-Age=0; Path=/`);
+      if (token) await redis.del(`cloudshop:session:${token}`, `cloudshop:csrf:${token}`);
+      response.setHeader("Set-Cookie", [
+        `${sessionCookie}=; HttpOnly; SameSite=Lax; Max-Age=0; Path=/`,
+        "cloudshop_csrf=; SameSite=Lax; Max-Age=0; Path=/"
+      ]);
       response.status(204).end();
     } catch (error) {
       next(error);
@@ -372,13 +395,14 @@ async function start() {
         "SELECT c.product_id AS productId, c.quantity, p.name, p.price, p.image_url AS imageUrl, p.stock FROM cart_items c JOIN products p ON p.id = c.product_id WHERE c.user_id = ? ORDER BY c.updated_at DESC",
         [request.user.id]
       );
-      response.status(200).json({ items, total: items.reduce((sum, item) => sum + Number(item.price) * item.quantity, 0) });
+      const totalCents = items.reduce((sum, item) => sum + toCents(item.price) * item.quantity, 0);
+      response.status(200).json({ items, total: (totalCents / 100).toFixed(2) });
     } catch (error) {
       next(error);
     }
   });
 
-  app.put("/api/cart/items/:productId", requireUser, async (request, response, next) => {
+  app.put("/api/cart/items/:productId", requireCsrf, async (request, response, next) => {
     try {
       const quantity = Number(request.body.quantity);
       if (!Number.isInteger(quantity) || quantity < 0 || quantity > 1000000) {
@@ -408,7 +432,7 @@ async function start() {
     }
   });
 
-  app.post("/api/orders", requireUser, async (request, response, next) => {
+  app.post("/api/orders", requireCsrf, async (request, response, next) => {
     let connection;
     try {
       connection = await mysqlPool.getConnection();
@@ -427,7 +451,8 @@ async function start() {
         response.status(409).json({ error: "one or more products no longer have enough stock" });
         return;
       }
-      const total = items.reduce((sum, item) => sum + Number(item.price) * item.quantity, 0);
+      const totalCents = items.reduce((sum, item) => sum + toCents(item.price) * item.quantity, 0);
+      const total = (totalCents / 100).toFixed(2);
       const [order] = await connection.query("INSERT INTO orders (user_id, total) VALUES (?, ?)", [request.user.id, total]);
       for (const item of items) {
         await connection.query("INSERT INTO order_items (order_id, product_id, product_name, unit_price, quantity) VALUES (?, ?, ?, ?, ?)", [order.insertId, item.productId, item.name, item.price, item.quantity]);
@@ -477,7 +502,7 @@ async function start() {
     }
   });
 
-  app.post("/api/orders/:id/cancel", requireUser, async (request, response, next) => {
+  app.post("/api/orders/:id/cancel", requireCsrf, async (request, response, next) => {
     let connection;
     try {
       connection = await mysqlPool.getConnection();
