@@ -50,7 +50,15 @@ redis.on("error", (error) => {
 });
 
 async function initializeDatabase() {
-  await mysqlPool.query(`
+  const connection = await mysqlPool.getConnection();
+  try {
+    const [lockResult] = await connection.query("SELECT GET_LOCK('cloudshop_schema_migration', 60) AS acquired");
+    if (lockResult[0].acquired !== 1) {
+      throw new Error("timed out waiting for database migration lock");
+    }
+
+    try {
+    await connection.query(`
     CREATE TABLE IF NOT EXISTS products (
       id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
       name VARCHAR(120) NOT NULL,
@@ -63,15 +71,15 @@ async function initializeDatabase() {
       updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       PRIMARY KEY (id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-  `);
+    `);
 
-  await mysqlPool.query("ALTER TABLE products ADD COLUMN IF NOT EXISTS category VARCHAR(80) NOT NULL DEFAULT 'General'");
-  await mysqlPool.query("ALTER TABLE products ADD COLUMN IF NOT EXISTS description TEXT NULL");
-  await mysqlPool.query("ALTER TABLE products ADD COLUMN IF NOT EXISTS image_url VARCHAR(2048) NULL");
-  await mysqlPool.query("ALTER TABLE products ADD COLUMN IF NOT EXISTS stock INT UNSIGNED NOT NULL DEFAULT 0");
-  await mysqlPool.query("ALTER TABLE products ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
+    await connection.query("ALTER TABLE products ADD COLUMN IF NOT EXISTS category VARCHAR(80) NOT NULL DEFAULT 'General'");
+    await connection.query("ALTER TABLE products ADD COLUMN IF NOT EXISTS description TEXT NULL");
+    await connection.query("ALTER TABLE products ADD COLUMN IF NOT EXISTS image_url VARCHAR(2048) NULL");
+    await connection.query("ALTER TABLE products ADD COLUMN IF NOT EXISTS stock INT UNSIGNED NOT NULL DEFAULT 0");
+    await connection.query("ALTER TABLE products ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
 
-  await mysqlPool.query(`
+    await connection.query(`
     CREATE TABLE IF NOT EXISTS users (
       id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
       email VARCHAR(255) NOT NULL,
@@ -82,18 +90,18 @@ async function initializeDatabase() {
       PRIMARY KEY (id),
       UNIQUE KEY users_email_unique (email)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-  `);
-  await mysqlPool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS role ENUM('customer', 'admin') NOT NULL DEFAULT 'customer'");
-  if (process.env.CLOUDSHOP_ADMIN_EMAIL && process.env.CLOUDSHOP_ADMIN_PASSWORD) {
+    `);
+    await connection.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS role ENUM('customer', 'admin') NOT NULL DEFAULT 'customer'");
+    if (process.env.CLOUDSHOP_ADMIN_EMAIL && process.env.CLOUDSHOP_ADMIN_PASSWORD) {
     const adminEmail = process.env.CLOUDSHOP_ADMIN_EMAIL.trim().toLowerCase();
-    if (/^\S+@\S+\.\S+$/.test(adminEmail) && process.env.CLOUDSHOP_ADMIN_PASSWORD.length >= 8) {
-      await mysqlPool.query(
-        "INSERT INTO users (email, name, role, password_hash) VALUES (?, 'CloudShop Admin', 'admin', ?) ON DUPLICATE KEY UPDATE role = 'admin'",
-        [adminEmail, hashPassword(process.env.CLOUDSHOP_ADMIN_PASSWORD)]
-      );
+      if (/^\S+@\S+\.\S+$/.test(adminEmail) && process.env.CLOUDSHOP_ADMIN_PASSWORD.length >= 8) {
+        await connection.query(
+          "INSERT INTO users (email, name, role, password_hash) VALUES (?, 'CloudShop Admin', 'admin', ?) ON DUPLICATE KEY UPDATE role = 'admin'",
+          [adminEmail, hashPassword(process.env.CLOUDSHOP_ADMIN_PASSWORD)]
+        );
+      }
     }
-  }
-  await mysqlPool.query(`
+    await connection.query(`
     CREATE TABLE IF NOT EXISTS cart_items (
       user_id BIGINT UNSIGNED NOT NULL,
       product_id BIGINT UNSIGNED NOT NULL,
@@ -101,8 +109,8 @@ async function initializeDatabase() {
       updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       PRIMARY KEY (user_id, product_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-  `);
-  await mysqlPool.query(`
+    `);
+    await connection.query(`
     CREATE TABLE IF NOT EXISTS orders (
       id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
       user_id BIGINT UNSIGNED NOT NULL,
@@ -111,8 +119,8 @@ async function initializeDatabase() {
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY (id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-  `);
-  await mysqlPool.query(`
+    `);
+    await connection.query(`
     CREATE TABLE IF NOT EXISTS order_items (
       id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
       order_id BIGINT UNSIGNED NOT NULL,
@@ -122,14 +130,20 @@ async function initializeDatabase() {
       quantity INT UNSIGNED NOT NULL,
       PRIMARY KEY (id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-  `);
+    `);
 
-  const [rows] = await mysqlPool.query("SELECT COUNT(*) AS count FROM products");
-  if (rows[0].count === 0) {
-    await mysqlPool.query(
-      "INSERT INTO products (name, price, category, stock) VALUES (?, ?, ?, ?), (?, ?, ?, ?), (?, ?, ?, ?)",
-      ["CloudShop Keyboard", 299.00, "Accessories", 25, "CloudShop Mouse", 129.00, "Accessories", 40, "CloudShop Monitor", 1599.00, "Displays", 12]
-    );
+    const [rows] = await connection.query("SELECT COUNT(*) AS count FROM products");
+    if (rows[0].count === 0) {
+      await connection.query(
+        "INSERT INTO products (name, price, category, stock) VALUES (?, ?, ?, ?), (?, ?, ?, ?), (?, ?, ?, ?)",
+        ["CloudShop Keyboard", 299.00, "Accessories", 25, "CloudShop Mouse", 129.00, "Accessories", 40, "CloudShop Monitor", 1599.00, "Displays", 12]
+      );
+    }
+    } finally {
+      await connection.query("SELECT RELEASE_LOCK('cloudshop_schema_migration')");
+    }
+  } finally {
+    connection.release();
   }
 }
 
