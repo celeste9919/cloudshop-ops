@@ -4,6 +4,11 @@ const categoryFilter = document.querySelector("#category-filter");
 const dialog = document.querySelector("#product-dialog");
 const form = document.querySelector("#product-form");
 const formError = document.querySelector("#form-error");
+const authDialog = document.querySelector("#auth-dialog");
+const authForm = document.querySelector("#auth-form");
+const authButton = document.querySelector("#auth-button");
+const addProductButton = document.querySelector("#open-product-form");
+let currentUser = null;
 
 function productImage(product) {
   return product.imageUrl || "https://images.unsplash.com/photo-1498049794561-7780e7231661?auto=format&fit=crop&w=960&q=80";
@@ -36,8 +41,8 @@ function productCard(product) {
       <div class="stock-row">
         <span>${escapeHtml(product.stock)} in stock</span>
         <div class="stock-actions">
-          <button type="button" title="Decrease stock" aria-label="Decrease stock" data-adjust="-1">-</button>
-          <button type="button" title="Increase stock" aria-label="Increase stock" data-adjust="1">+</button>
+          <button type="button" title="Decrease stock" aria-label="Decrease stock" data-adjust="-1" ${currentUser && currentUser.role === "admin" ? "" : "disabled"}>-</button>
+          <button type="button" title="Increase stock" aria-label="Increase stock" data-adjust="1" ${currentUser && currentUser.role === "admin" ? "" : "disabled"}>+</button>
         </div>
       </div>
     </div>`;
@@ -86,8 +91,20 @@ async function adjustStock(id, quantity) {
   await loadProducts();
 }
 
-document.querySelector("#open-product-form").addEventListener("click", () => dialog.showModal());
+addProductButton.addEventListener("click", () => dialog.showModal());
+authButton.addEventListener("click", async () => {
+  if (!currentUser) {
+    authDialog.showModal();
+    return;
+  }
+  await fetch("/api/auth/logout", { method: "POST" });
+  currentUser = null;
+  authButton.textContent = "Sign in";
+  addProductButton.disabled = true;
+  await loadProducts();
+});
 document.querySelector("#close-product-form").addEventListener("click", () => dialog.close());
+document.querySelector("#close-auth-form").addEventListener("click", () => authDialog.close());
 document.querySelector("#refresh-products").addEventListener("click", async () => {
   await loadCategories();
   await loadProducts();
@@ -115,4 +132,30 @@ form.addEventListener("submit", async (event) => {
   await loadProducts();
 });
 
-Promise.all([loadCategories(), loadProducts()]);
+authForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const response = await fetch("/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(Object.fromEntries(new FormData(authForm)))
+  });
+  if (!response.ok) {
+    document.querySelector("#auth-error").textContent = (await response.json()).error || "Sign in failed.";
+    return;
+  }
+  currentUser = await response.json();
+  authButton.textContent = `Sign out (${currentUser.name})`;
+  addProductButton.disabled = currentUser.role !== "admin";
+  authForm.reset();
+  authDialog.close();
+  await loadProducts();
+});
+
+fetch("/api/auth/me").then((response) => response.ok ? response.json() : null).then((user) => {
+  currentUser = user;
+  if (user) {
+    authButton.textContent = "Sign out (" + user.name + ")";
+    addProductButton.disabled = user.role !== "admin";
+  }
+  return Promise.all([loadCategories(), loadProducts()]);
+});

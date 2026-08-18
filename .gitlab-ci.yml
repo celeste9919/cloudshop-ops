@@ -72,11 +72,14 @@ deploy-cloudshop-foundation:
     - ': "${CLOUDSHOP_MYSQL_ROOT_PASSWORD:?CLOUDSHOP_MYSQL_ROOT_PASSWORD must be configured as a masked CI variable}"'
     - ': "${CLOUDSHOP_MYSQL_PASSWORD:?CLOUDSHOP_MYSQL_PASSWORD must be configured as a masked CI variable}"'
     - ': "${CLOUDSHOP_REDIS_PASSWORD:?CLOUDSHOP_REDIS_PASSWORD must be configured as a masked CI variable}"'
+    - ': "${CLOUDSHOP_ADMIN_EMAIL:?CLOUDSHOP_ADMIN_EMAIL must be configured as a masked CI variable}"'
+    - ': "${CLOUDSHOP_ADMIN_PASSWORD:?CLOUDSHOP_ADMIN_PASSWORD must be configured as a masked CI variable}"'
     - kubectl apply -f kubernetes/middleware/namespace.yaml
     - kubectl apply -f kubernetes/apps/namespace.yaml
     - kubectl create secret generic cloudshop-db-secret -n cloudshop-data --from-literal=MYSQL_ROOT_PASSWORD="$CLOUDSHOP_MYSQL_ROOT_PASSWORD" --from-literal=MYSQL_PASSWORD="$CLOUDSHOP_MYSQL_PASSWORD" --dry-run=client -o yaml | kubectl apply -f -
     - kubectl create secret generic cloudshop-cache-secret -n cloudshop-data --from-literal=REDIS_PASSWORD="$CLOUDSHOP_REDIS_PASSWORD" --dry-run=client -o yaml | kubectl apply -f -
     - kubectl create secret docker-registry harbor-registry-secret -n cloudshop-app --docker-server=172.25.254.105 --docker-username="$HARBOR_USER" --docker-password="$HARBOR_PASSWORD" --dry-run=client -o yaml | kubectl apply -f -
+    - kubectl create secret generic cloudshop-admin-secret -n cloudshop-app --from-literal=CLOUDSHOP_ADMIN_EMAIL="$CLOUDSHOP_ADMIN_EMAIL" --from-literal=CLOUDSHOP_ADMIN_PASSWORD="$CLOUDSHOP_ADMIN_PASSWORD" --dry-run=client -o yaml | kubectl apply -f -
     - kubectl apply -f kubernetes/middleware/mysql-statefulset.yaml
     - kubectl apply -f kubernetes/middleware/redis.yaml
     - kubectl rollout status statefulset/mysql -n cloudshop-data --timeout=300s

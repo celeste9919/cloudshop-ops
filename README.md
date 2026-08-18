@@ -120,11 +120,13 @@ CI Runner 需要能够访问 Kubernetes API、Harbor 和 GitLab。部署前在 G
 CLOUDSHOP_MYSQL_ROOT_PASSWORD
 CLOUDSHOP_MYSQL_PASSWORD
 CLOUDSHOP_REDIS_PASSWORD
+CLOUDSHOP_ADMIN_EMAIL
+CLOUDSHOP_ADMIN_PASSWORD
 HARBOR_USER
 HARBOR_PASSWORD
 ```
 
-基础设施 Job 会创建命名空间、运行期 Secret、Harbor image pull Secret、MySQL、Redis、PVC 和逻辑备份 CronJob，并等待数据层就绪。API Job 随后应用 API、Ingress、ServiceMonitor 并滚动更新当前构建镜像。
+基础设施 Job 会创建命名空间、运行期 Secret、Harbor image pull Secret、MySQL、Redis、PVC 和逻辑备份 CronJob，并等待数据层就绪。配置管理员变量后，API 首次启动会自动创建管理员账户。API Job 随后应用 API、Ingress、ServiceMonitor 并滚动更新当前构建镜像。
 
 本地检查清单：
 

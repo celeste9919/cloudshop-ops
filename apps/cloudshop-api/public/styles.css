@@ -9,7 +9,11 @@ main { margin: 0 auto; max-width: 1200px; padding: 24px; }
 .catalog-controls { align-items: end; display: flex; gap: 12px; justify-content: space-between; }
 label { color: #42545a; display: grid; font-size: 14px; font-weight: 700; gap: 6px; }
 input, select, textarea { background: #ffffff; border: 1px solid #9aacab; border-radius: 4px; color: #1b2630; font: inherit; padding: 9px; width: 100%; }
-.primary-action { background: #087b78; border: 1px solid #066562; border-radius: 4px; color: #ffffff; cursor: pointer; font: inherit; font-weight: 700; padding: 10px 14px; }
+.header-actions { display: flex; gap: 8px; }
+.primary-action, .secondary-action { border-radius: 4px; cursor: pointer; font: inherit; font-weight: 700; padding: 10px 14px; }
+.primary-action { background: #087b78; border: 1px solid #066562; color: #ffffff; }
+.primary-action:disabled { background: #9aacab; border-color: #9aacab; cursor: not-allowed; }
+.secondary-action { background: #ffffff; border: 1px solid #9aacab; color: #1b2630; }
 .icon-button, .stock-actions button { background: #ffffff; border: 1px solid #9aacab; border-radius: 4px; color: #1b2630; cursor: pointer; font: inherit; min-height: 34px; min-width: 34px; }
 .status { color: #566b70; font-size: 14px; margin: 18px 0; }
 .product-grid { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }

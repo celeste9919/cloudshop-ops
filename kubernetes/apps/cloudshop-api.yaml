@@ -23,6 +23,16 @@ spec:
             - name: http
               containerPort: 8080
           env:
+            - name: CLOUDSHOP_ADMIN_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: cloudshop-admin-secret
+                  key: CLOUDSHOP_ADMIN_EMAIL
+            - name: CLOUDSHOP_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cloudshop-admin-secret
+                  key: CLOUDSHOP_ADMIN_PASSWORD
             - name: MYSQL_HOST
               value: mysql.cloudshop-data.svc.cluster.local
             - name: MYSQL_PORT

@@ -76,12 +76,23 @@ async function initializeDatabase() {
       id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
       email VARCHAR(255) NOT NULL,
       name VARCHAR(120) NOT NULL,
+      role ENUM('customer', 'admin') NOT NULL DEFAULT 'customer',
       password_hash VARCHAR(255) NOT NULL,
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY (id),
       UNIQUE KEY users_email_unique (email)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
+  await mysqlPool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS role ENUM('customer', 'admin') NOT NULL DEFAULT 'customer'");
+  if (process.env.CLOUDSHOP_ADMIN_EMAIL && process.env.CLOUDSHOP_ADMIN_PASSWORD) {
+    const adminEmail = process.env.CLOUDSHOP_ADMIN_EMAIL.trim().toLowerCase();
+    if (/^\S+@\S+\.\S+$/.test(adminEmail) && process.env.CLOUDSHOP_ADMIN_PASSWORD.length >= 8) {
+      await mysqlPool.query(
+        "INSERT INTO users (email, name, role, password_hash) VALUES (?, 'CloudShop Admin', 'admin', ?) ON DUPLICATE KEY UPDATE role = 'admin'",
+        [adminEmail, hashPassword(process.env.CLOUDSHOP_ADMIN_PASSWORD)]
+      );
+    }
+  }
   await mysqlPool.query(`
     CREATE TABLE IF NOT EXISTS cart_items (
       user_id BIGINT UNSIGNED NOT NULL,
@@ -151,7 +162,7 @@ async function currentUser(request) {
   if (!token) return null;
   const userId = await redis.get(`cloudshop:session:${token}`);
   if (!userId) return null;
-  const [users] = await mysqlPool.query("SELECT id, email, name, created_at FROM users WHERE id = ?", [userId]);
+  const [users] = await mysqlPool.query("SELECT id, email, name, role, created_at FROM users WHERE id = ?", [userId]);
   return users[0] || null;
 }
 
@@ -167,6 +178,20 @@ async function requireUser(request, response, next) {
   } catch (error) {
     next(error);
   }
+}
+
+async function requireAdmin(request, response, next) {
+  await requireUser(request, response, (error) => {
+    if (error) {
+      next(error);
+      return;
+    }
+    if (request.user.role !== "admin") {
+      response.status(403).json({ error: "administrator access required" });
+      return;
+    }
+    next();
+  });
 }
 
 async function initializeDependencies() {
@@ -298,7 +323,7 @@ async function start() {
     try {
       const email = typeof request.body.email === "string" ? request.body.email.trim().toLowerCase() : "";
       const password = typeof request.body.password === "string" ? request.body.password : "";
-      const [users] = await mysqlPool.query("SELECT id, email, name, password_hash FROM users WHERE email = ?", [email]);
+      const [users] = await mysqlPool.query("SELECT id, email, name, role, password_hash FROM users WHERE email = ?", [email]);
       if (users.length === 0 || !verifyPassword(password, users[0].password_hash)) {
         response.status(401).json({ error: "invalid email or password" });
         return;
@@ -306,7 +331,7 @@ async function start() {
       const token = crypto.randomBytes(32).toString("hex");
       await redis.setEx(`cloudshop:session:${token}`, sessionTtlSeconds, String(users[0].id));
       response.setHeader("Set-Cookie", `${sessionCookie}=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Max-Age=${sessionTtlSeconds}; Path=/`);
-      response.status(200).json({ id: users[0].id, email: users[0].email, name: users[0].name });
+      response.status(200).json({ id: users[0].id, email: users[0].email, name: users[0].name, role: users[0].role });
     } catch (error) {
       next(error);
     }
@@ -415,7 +440,7 @@ async function start() {
     }
   });
 
-  app.post("/api/products", async (request, response, next) => {
+  app.post("/api/products", requireAdmin, async (request, response, next) => {
     try {
       const result = validateProductInput(request.body);
       if (result.error) {
@@ -451,7 +476,7 @@ async function start() {
     }
   });
 
-  app.patch("/api/products/:id", async (request, response, next) => {
+  app.patch("/api/products/:id", requireAdmin, async (request, response, next) => {
     try {
       const result = validateProductInput(request.body, { partial: true });
       if (result.error) {
@@ -488,7 +513,7 @@ async function start() {
     }
   });
 
-  app.post("/api/products/:id/stock", async (request, response, next) => {
+  app.post("/api/products/:id/stock", requireAdmin, async (request, response, next) => {
     try {
       const result = validateStockAdjustment(request.body);
       if (result.error) {

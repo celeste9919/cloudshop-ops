@@ -12,7 +12,10 @@
         <p class="eyebrow">CloudShop</p>
         <h1>Catalog</h1>
       </div>
-      <button class="primary-action" type="button" id="open-product-form">Add product</button>
+      <div class="header-actions">
+        <button class="secondary-action" type="button" id="auth-button">Sign in</button>
+        <button class="primary-action" type="button" id="open-product-form" disabled>Add product</button>
+      </div>
     </header>
     <main>
       <section class="catalog-controls" aria-label="Product filters">
@@ -40,6 +43,18 @@
         <label>Description<textarea name="description" maxlength="2000" rows="3"></textarea></label>
         <p class="form-error" id="form-error" role="alert"></p>
         <button class="primary-action" type="submit">Create product</button>
+      </form>
+    </dialog>
+    <dialog id="auth-dialog">
+      <form id="auth-form" method="dialog">
+        <div class="dialog-heading">
+          <h2>Sign in</h2>
+          <button class="icon-button" type="button" id="close-auth-form" title="Close" aria-label="Close">X</button>
+        </div>
+        <label>Email<input name="email" type="email" autocomplete="username" required></label>
+        <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+        <p class="form-error" id="auth-error" role="alert"></p>
+        <button class="primary-action" type="submit">Sign in</button>
       </form>
     </dialog>
     <script src="/app.js"></script>
