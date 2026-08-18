@@ -15,6 +15,7 @@ secrets.yaml
 .idea/
 *.swp
 .DS_Store
+node_modules/
 
 # Local recovery, backup, and generated artifacts
 charts/

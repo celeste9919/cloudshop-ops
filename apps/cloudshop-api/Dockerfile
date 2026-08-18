@@ -6,6 +6,8 @@ COPY package*.json ./
 RUN npm ci --omit=dev
 
 COPY server.js ./
+COPY product-validation.js ./
+COPY public ./public
 
 USER node
 

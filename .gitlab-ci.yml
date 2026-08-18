@@ -59,6 +59,30 @@ build-cloudshop-api:
     - docker push "$IMAGE"
     - docker logout 172.25.254.105
 
+deploy-cloudshop-foundation:
+  stage: deploy
+  image:
+    name: bitnami/kubectl:latest
+    entrypoint: [""]
+  tags:
+    - infra-docker
+  resource_group: cloudshop-foundation-production
+  script:
+    - export KUBECONFIG=/tmp/cloudshop-kubeconfig
+    - ': "${CLOUDSHOP_MYSQL_ROOT_PASSWORD:?CLOUDSHOP_MYSQL_ROOT_PASSWORD must be configured as a masked CI variable}"'
+    - ': "${CLOUDSHOP_MYSQL_PASSWORD:?CLOUDSHOP_MYSQL_PASSWORD must be configured as a masked CI variable}"'
+    - ': "${CLOUDSHOP_REDIS_PASSWORD:?CLOUDSHOP_REDIS_PASSWORD must be configured as a masked CI variable}"'
+    - kubectl apply -f kubernetes/middleware/namespace.yaml
+    - kubectl apply -f kubernetes/apps/namespace.yaml
+    - kubectl create secret generic cloudshop-db-secret -n cloudshop-data --from-literal=MYSQL_ROOT_PASSWORD="$CLOUDSHOP_MYSQL_ROOT_PASSWORD" --from-literal=MYSQL_PASSWORD="$CLOUDSHOP_MYSQL_PASSWORD" --dry-run=client -o yaml | kubectl apply -f -
+    - kubectl create secret generic cloudshop-cache-secret -n cloudshop-data --from-literal=REDIS_PASSWORD="$CLOUDSHOP_REDIS_PASSWORD" --dry-run=client -o yaml | kubectl apply -f -
+    - kubectl create secret docker-registry harbor-registry-secret -n cloudshop-app --docker-server=172.25.254.105 --docker-username="$HARBOR_USER" --docker-password="$HARBOR_PASSWORD" --dry-run=client -o yaml | kubectl apply -f -
+    - kubectl apply -f kubernetes/middleware/mysql-statefulset.yaml
+    - kubectl apply -f kubernetes/middleware/redis.yaml
+    - kubectl rollout status statefulset/mysql -n cloudshop-data --timeout=300s
+    - kubectl rollout status statefulset/redis -n cloudshop-data --timeout=180s
+    - kubectl apply -f kubernetes/middleware/mysql-logical-backup.yaml
+
 deploy-cloudshop-api:
   stage: deploy
   image:
@@ -69,11 +93,14 @@ deploy-cloudshop-api:
   resource_group: cloudshop-api-production
   needs:
     - build-cloudshop-api
+    - deploy-cloudshop-foundation
   script:
     - export KUBECONFIG=/tmp/cloudshop-kubeconfig
     - export IMAGE="172.25.254.105/cloudshop/cloudshop-api:${CI_COMMIT_SHORT_SHA}"
     - export LATEST_SHA="$(git ls-remote origin refs/heads/main 2>/dev/null | awk '{print $1}')"
     - if [ -n "$LATEST_SHA" ] && [ "$LATEST_SHA" != "$CI_COMMIT_SHA" ]; then echo "Skipping superseded commit $CI_COMMIT_SHA; main is $LATEST_SHA"; exit 0; fi
+    - kubectl apply -f kubernetes/apps/cloudshop-api.yaml
+    - kubectl apply -f kubernetes/apps/cloudshop-api-monitoring.yaml
     - kubectl set image deployment/cloudshop-api cloudshop-api="$IMAGE" -n cloudshop-app
     - kubectl rollout status deployment/cloudshop-api -n cloudshop-app --timeout=180s
     - kubectl get deployment cloudshop-api -n cloudshop-app -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'

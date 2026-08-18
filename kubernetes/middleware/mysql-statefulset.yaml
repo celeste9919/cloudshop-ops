@@ -36,6 +36,21 @@ spec:
           ports:
             - name: mysql
               containerPort: 3306
+          env:
+            - name: MYSQL_DATABASE
+              value: cloudshop
+            - name: MYSQL_USER
+              value: cloudshop
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cloudshop-db-secret
+                  key: MYSQL_ROOT_PASSWORD
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cloudshop-db-secret
+                  key: MYSQL_PASSWORD
           resources:
             requests:
               cpu: 100m
@@ -64,7 +79,13 @@ spec:
           volumeMounts:
             - name: mysql-data
               mountPath: /var/lib/mysql
-      volumes:
-        - name: mysql-data
-          persistentVolumeClaim:
-            claimName: mysql-data-mysql-0
+  volumeClaimTemplates:
+    - metadata:
+        name: mysql-data
+      spec:
+        storageClassName: nfs-client
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 10Gi

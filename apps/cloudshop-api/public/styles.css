@@ -1,0 +1,31 @@
+:root { color: #1b2630; background: #f4f7f6; font-family: Arial, sans-serif; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+.topbar { align-items: center; background: #ffffff; border-bottom: 1px solid #c9d4d1; display: flex; justify-content: space-between; min-height: 104px; padding: 20px max(24px, calc((100% - 1200px) / 2)); }
+.eyebrow { color: #087b78; font-size: 14px; font-weight: 700; margin: 0 0 6px; }
+h1, h2, p { margin-top: 0; }
+h1 { font-size: 28px; margin-bottom: 0; }
+main { margin: 0 auto; max-width: 1200px; padding: 24px; }
+.catalog-controls { align-items: end; display: flex; gap: 12px; justify-content: space-between; }
+label { color: #42545a; display: grid; font-size: 14px; font-weight: 700; gap: 6px; }
+input, select, textarea { background: #ffffff; border: 1px solid #9aacab; border-radius: 4px; color: #1b2630; font: inherit; padding: 9px; width: 100%; }
+.primary-action { background: #087b78; border: 1px solid #066562; border-radius: 4px; color: #ffffff; cursor: pointer; font: inherit; font-weight: 700; padding: 10px 14px; }
+.icon-button, .stock-actions button { background: #ffffff; border: 1px solid #9aacab; border-radius: 4px; color: #1b2630; cursor: pointer; font: inherit; min-height: 34px; min-width: 34px; }
+.status { color: #566b70; font-size: 14px; margin: 18px 0; }
+.product-grid { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.product { background: #ffffff; border: 1px solid #c9d4d1; border-radius: 6px; overflow: hidden; }
+.product > img { aspect-ratio: 4 / 3; display: block; object-fit: cover; width: 100%; }
+.product-body { padding: 16px; }
+.category { color: #a54318; font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+.product h2 { font-size: 18px; margin-bottom: 8px; }
+.price { color: #087b78; font-size: 18px; font-weight: 700; margin-bottom: 10px; }
+.description { color: #566b70; font-size: 14px; min-height: 38px; }
+.stock-row { align-items: center; border-top: 1px solid #e1e8e6; display: flex; font-size: 14px; justify-content: space-between; padding-top: 12px; }
+.stock-actions { display: flex; gap: 6px; }
+dialog { border: 1px solid #9aacab; border-radius: 6px; max-width: 520px; padding: 0; width: calc(100% - 32px); }
+dialog::backdrop { background: rgba(27, 38, 48, 0.45); }
+dialog form { display: grid; gap: 14px; padding: 20px; }
+.dialog-heading { align-items: center; display: flex; justify-content: space-between; }
+.dialog-heading h2 { margin: 0; }
+.form-error { color: #ad271d; margin: 0; min-height: 20px; }
+@media (max-width: 600px) { .topbar { align-items: flex-start; flex-direction: column; gap: 16px; } .catalog-controls { align-items: end; } }

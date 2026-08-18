@@ -60,6 +60,20 @@ Redis service: redis.cloudshop-data.svc.cluster.local
 Service port: 80
 Container port: 8080
 The API retries dependency initialization during startup so temporary MySQL, Redis or DNS interruptions do not immediately terminate the process.
+
+## Product API
+
+The product catalog supports category, description, product image URL, and stock
+quantity. All write operations invalidate the Redis-backed catalog cache.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/products` | List products; supports optional `category` filter |
+| `GET` | `/api/products/:id` | Get one product |
+| `POST` | `/api/products` | Create a product |
+| `PATCH` | `/api/products/:id` | Update product details |
+| `POST` | `/api/products/:id/stock` | Adjust stock with `{ "quantity": integer }` |
+| `GET` | `/api/categories` | List product categories |
 Observability
 Prometheus scrapes the API through a ServiceMonitor at:
 /metrics
@@ -83,3 +97,17 @@ Compresses backups with gzip
 Creates SHA256 checksums
 Retains backups for 14 days
 Backup restore has been verified in an isolated temporary MySQL instance.
+
+## Deployment Prerequisites
+
+The `deploy-cloudshop-foundation` CI job creates the `cloudshop-data` and
+`cloudshop-app` namespaces, middleware workloads, runtime Secrets, registry
+pull Secret, and the logical backup CronJob. Configure these masked GitLab CI
+variables before running it:
+
+- `CLOUDSHOP_MYSQL_ROOT_PASSWORD`
+- `CLOUDSHOP_MYSQL_PASSWORD`
+- `CLOUDSHOP_REDIS_PASSWORD`
+
+The job does not store or print their values. It waits for MySQL and Redis to
+be ready before `deploy-cloudshop-api` applies and rolls out the API.

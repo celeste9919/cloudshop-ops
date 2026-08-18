@@ -2,6 +2,7 @@ const express = require("express");
 const mysql = require("mysql2/promise");
 const { createClient } = require("redis");
 const client = require("prom-client");
+const { validateProductInput, validateStockAdjustment } = require("./product-validation");
 
 const port = Number(process.env.PORT || 8080);
 const startupRetryAttempts = Number(process.env.STARTUP_RETRY_ATTEMPTS || 12);
@@ -50,16 +51,27 @@ async function initializeDatabase() {
       id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
       name VARCHAR(120) NOT NULL,
       price DECIMAL(10,2) NOT NULL,
+      category VARCHAR(80) NOT NULL DEFAULT 'General',
+      description TEXT NULL,
+      image_url VARCHAR(2048) NULL,
+      stock INT UNSIGNED NOT NULL DEFAULT 0,
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       PRIMARY KEY (id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
 
+  await mysqlPool.query("ALTER TABLE products ADD COLUMN IF NOT EXISTS category VARCHAR(80) NOT NULL DEFAULT 'General'");
+  await mysqlPool.query("ALTER TABLE products ADD COLUMN IF NOT EXISTS description TEXT NULL");
+  await mysqlPool.query("ALTER TABLE products ADD COLUMN IF NOT EXISTS image_url VARCHAR(2048) NULL");
+  await mysqlPool.query("ALTER TABLE products ADD COLUMN IF NOT EXISTS stock INT UNSIGNED NOT NULL DEFAULT 0");
+  await mysqlPool.query("ALTER TABLE products ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
+
   const [rows] = await mysqlPool.query("SELECT COUNT(*) AS count FROM products");
   if (rows[0].count === 0) {
     await mysqlPool.query(
-      "INSERT INTO products (name, price) VALUES (?, ?), (?, ?), (?, ?)",
-      ["CloudShop Keyboard", 299.00, "CloudShop Mouse", 129.00, "CloudShop Monitor", 1599.00]
+      "INSERT INTO products (name, price, category, stock) VALUES (?, ?, ?, ?), (?, ?, ?, ?), (?, ?, ?, ?)",
+      ["CloudShop Keyboard", 299.00, "Accessories", 25, "CloudShop Mouse", 129.00, "Accessories", 40, "CloudShop Monitor", 1599.00, "Displays", 12]
     );
   }
 }
@@ -104,18 +116,24 @@ async function initializeDependencies() {
 }
 
 
-async function getProducts() {
-  const cacheKey = "cloudshop:products:v1";
+async function getProducts(category) {
+  const cacheVersion = (await redis.get("cloudshop:products:version")) || "1";
+  const cacheKey = `cloudshop:products:v3:${cacheVersion}:${category || "all"}`;
   const cached = await redis.get(cacheKey);
   if (cached) {
     return { source: "cache", products: JSON.parse(cached) };
   }
 
-  const [products] = await mysqlPool.query(
-    "SELECT id, name, price, created_at FROM products ORDER BY id"
-  );
+  const query = "SELECT id, name, price, category, description, image_url AS imageUrl, stock, created_at, updated_at FROM products";
+  const [products] = category
+    ? await mysqlPool.query(`${query} WHERE category = ? ORDER BY id`, [category])
+    : await mysqlPool.query(`${query} ORDER BY id`);
   await redis.setEx(cacheKey, 60, JSON.stringify(products));
   return { source: "database", products };
+}
+
+async function clearProductsCache() {
+  await redis.incr("cloudshop:products:version");
 }
 
 async function start() {
@@ -123,6 +141,7 @@ async function start() {
 
   const app = express();
   app.use(express.json());
+  app.use(express.static("public"));
 
   app.use((request, response, next) => {
     if (request.path === "/metrics") {
@@ -163,9 +182,10 @@ async function start() {
     }
   });
 
-  app.get("/api/products", async (_request, response, next) => {
+  app.get("/api/products", async (request, response, next) => {
     try {
-      response.status(200).json(await getProducts());
+      const category = typeof request.query.category === "string" ? request.query.category.trim() : "";
+      response.status(200).json(await getProducts(category || undefined));
     } catch (error) {
       next(error);
     }
@@ -173,18 +193,108 @@ async function start() {
 
   app.post("/api/products", async (request, response, next) => {
     try {
-      const { name, price } = request.body;
-      if (typeof name !== "string" || !name.trim() || !Number.isFinite(Number(price))) {
-        response.status(400).json({ error: "name and numeric price are required" });
+      const result = validateProductInput(request.body);
+      if (result.error) {
+        response.status(400).json({ error: result.error });
         return;
       }
 
-      const [result] = await mysqlPool.query(
-        "INSERT INTO products (name, price) VALUES (?, ?)",
-        [name.trim(), Number(price)]
+      const product = result.value;
+      const [insert] = await mysqlPool.query(
+        "INSERT INTO products (name, price, category, description, image_url, stock) VALUES (?, ?, ?, ?, ?, ?)",
+        [product.name, product.price, product.category, product.description || null, product.imageUrl || null, product.stock]
       );
-      await redis.del("cloudshop:products:v1");
-      response.status(201).json({ id: result.insertId, name: name.trim(), price: Number(price) });
+      await clearProductsCache();
+      response.status(201).json({ id: insert.insertId, ...product });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/products/:id", async (request, response, next) => {
+    try {
+      const [products] = await mysqlPool.query(
+        "SELECT id, name, price, category, description, image_url AS imageUrl, stock, created_at, updated_at FROM products WHERE id = ?",
+        [request.params.id]
+      );
+      if (products.length === 0) {
+        response.status(404).json({ error: "product not found" });
+        return;
+      }
+      response.status(200).json(products[0]);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.patch("/api/products/:id", async (request, response, next) => {
+    try {
+      const result = validateProductInput(request.body, { partial: true });
+      if (result.error) {
+        response.status(400).json({ error: result.error });
+        return;
+      }
+      const product = result.value;
+      if (Object.keys(product).length === 0) {
+        response.status(400).json({ error: "at least one product field is required" });
+        return;
+      }
+
+      const columns = [];
+      const values = [];
+      const columnMap = { name: "name", price: "price", category: "category", description: "description", imageUrl: "image_url", stock: "stock" };
+      for (const [key, value] of Object.entries(product)) {
+        columns.push(`${columnMap[key]} = ?`);
+        values.push(value);
+      }
+      values.push(request.params.id);
+      const [update] = await mysqlPool.query(`UPDATE products SET ${columns.join(", ")} WHERE id = ?`, values);
+      if (update.affectedRows === 0) {
+        response.status(404).json({ error: "product not found" });
+        return;
+      }
+      await clearProductsCache();
+      const [products] = await mysqlPool.query(
+        "SELECT id, name, price, category, description, image_url AS imageUrl, stock, created_at, updated_at FROM products WHERE id = ?",
+        [request.params.id]
+      );
+      response.status(200).json(products[0]);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/products/:id/stock", async (request, response, next) => {
+    try {
+      const result = validateStockAdjustment(request.body);
+      if (result.error) {
+        response.status(400).json({ error: result.error });
+        return;
+      }
+      const quantity = result.value;
+      const [update] = await mysqlPool.query(
+        "UPDATE products SET stock = stock + ? WHERE id = ? AND stock + ? >= 0",
+        [quantity, request.params.id, quantity]
+      );
+      if (update.affectedRows === 0) {
+        response.status(409).json({ error: "product not found or insufficient stock" });
+        return;
+      }
+      await clearProductsCache();
+      const [products] = await mysqlPool.query(
+        "SELECT id, name, price, category, description, image_url AS imageUrl, stock, created_at, updated_at FROM products WHERE id = ?",
+        [request.params.id]
+      );
+      response.status(200).json(products[0]);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/categories", async (_request, response, next) => {
+    try {
+      const [categories] = await mysqlPool.query("SELECT DISTINCT category FROM products ORDER BY category");
+      response.status(200).json({ categories: categories.map((row) => row.category) });
     } catch (error) {
       next(error);
     }
