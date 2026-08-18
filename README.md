@@ -17,6 +17,8 @@ CloudShop Ops 是一个面向 Kubernetes 的电商商品目录与库存管理 MV
 - Loki 日志采集与 Grafana datasource
 - 每日 MySQL 逻辑备份、gzip 压缩、SHA256 校验和 14 天保留
 - 商品管理 Web 界面，由 API 容器直接托管
+- 用户注册、登录、退出和当前用户查询
+- Redis 会话、购物车和事务性订单创建
 
 ## 架构
 
@@ -91,6 +93,13 @@ REDIS_PASSWORD=<runtime-secret>
 | `PATCH` | `/api/products/:id` | 更新商品字段 |
 | `POST` | `/api/products/:id/stock` | 使用 `{ "quantity": 1 }` 增减库存 |
 | `GET` | `/api/categories` | 获取分类列表 |
+| `POST` | `/api/auth/register` | 注册用户 |
+| `POST` | `/api/auth/login` | 登录并建立 HttpOnly 会话 |
+| `POST` | `/api/auth/logout` | 注销会话 |
+| `GET` | `/api/auth/me` | 获取当前登录用户 |
+| `GET` | `/api/cart` | 获取当前用户购物车 |
+| `PUT` | `/api/cart/items/:productId` | 设置购物车商品数量 |
+| `POST` | `/api/orders` | 将购物车转换为待支付订单并扣减库存 |
 | `GET` | `/healthz` | 进程健康检查 |
 | `GET` | `/readyz` | MySQL 和 Redis 就绪检查 |
 | `GET` | `/metrics` | Prometheus 指标 |
@@ -132,6 +141,8 @@ kubectl apply --dry-run=server -f kubernetes/apps/cloudshop-api.yaml
 Grafana 地址为 `grafana.cloudshop.local`，默认由 ingress-nginx NodePort `30080` 提供 HTTP 入口。API Dashboard 覆盖可用性、请求率、5xx、P95 延迟和进程内存；PrometheusRule 覆盖 API 不可用、目标丢失、5xx 过高和 P95 延迟过高。
 
 MySQL 备份 CronJob 每天 `03:30` 运行，使用 `mysqldump` 生成 gzip 文件和 SHA256 校验文件，并删除超过 14 天的备份。
+
+订单当前状态为 `pending_payment`，库存扣减和订单明细写入在同一数据库事务中完成。支付服务尚未接入，后续可以通过订单状态和支付适配器接入真实支付渠道。
 
 ## 验证
 

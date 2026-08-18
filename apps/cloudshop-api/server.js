@@ -1,8 +1,12 @@
 const express = require("express");
+const crypto = require("node:crypto");
 const mysql = require("mysql2/promise");
 const { createClient } = require("redis");
 const client = require("prom-client");
 const { validateProductInput, validateStockAdjustment } = require("./product-validation");
+
+const sessionCookie = "cloudshop_session";
+const sessionTtlSeconds = 7 * 24 * 60 * 60;
 
 const port = Number(process.env.PORT || 8080);
 const startupRetryAttempts = Number(process.env.STARTUP_RETRY_ATTEMPTS || 12);
@@ -67,6 +71,48 @@ async function initializeDatabase() {
   await mysqlPool.query("ALTER TABLE products ADD COLUMN IF NOT EXISTS stock INT UNSIGNED NOT NULL DEFAULT 0");
   await mysqlPool.query("ALTER TABLE products ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
 
+  await mysqlPool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      email VARCHAR(255) NOT NULL,
+      name VARCHAR(120) NOT NULL,
+      password_hash VARCHAR(255) NOT NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      UNIQUE KEY users_email_unique (email)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+  await mysqlPool.query(`
+    CREATE TABLE IF NOT EXISTS cart_items (
+      user_id BIGINT UNSIGNED NOT NULL,
+      product_id BIGINT UNSIGNED NOT NULL,
+      quantity INT UNSIGNED NOT NULL,
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (user_id, product_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+  await mysqlPool.query(`
+    CREATE TABLE IF NOT EXISTS orders (
+      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      user_id BIGINT UNSIGNED NOT NULL,
+      status ENUM('pending_payment', 'paid', 'cancelled') NOT NULL DEFAULT 'pending_payment',
+      total DECIMAL(10,2) NOT NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+  await mysqlPool.query(`
+    CREATE TABLE IF NOT EXISTS order_items (
+      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      order_id BIGINT UNSIGNED NOT NULL,
+      product_id BIGINT UNSIGNED NOT NULL,
+      product_name VARCHAR(120) NOT NULL,
+      unit_price DECIMAL(10,2) NOT NULL,
+      quantity INT UNSIGNED NOT NULL,
+      PRIMARY KEY (id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
   const [rows] = await mysqlPool.query("SELECT COUNT(*) AS count FROM products");
   if (rows[0].count === 0) {
     await mysqlPool.query(
@@ -78,6 +124,49 @@ async function initializeDatabase() {
 
 function sleep(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function hashPassword(password) {
+  const salt = crypto.randomBytes(16).toString("hex");
+  const hash = crypto.scryptSync(password, salt, 64).toString("hex");
+  return `${salt}:${hash}`;
+}
+
+function verifyPassword(password, encoded) {
+  const [salt, expected] = encoded.split(":");
+  if (!salt || !expected) return false;
+  const actual = crypto.scryptSync(password, salt, 64).toString("hex");
+  return crypto.timingSafeEqual(Buffer.from(actual, "hex"), Buffer.from(expected, "hex"));
+}
+
+function cookies(request) {
+  return Object.fromEntries((request.headers.cookie || "").split(";").filter(Boolean).map((part) => {
+    const index = part.indexOf("=");
+    return [part.slice(0, index).trim(), decodeURIComponent(part.slice(index + 1).trim())];
+  }));
+}
+
+async function currentUser(request) {
+  const token = cookies(request)[sessionCookie];
+  if (!token) return null;
+  const userId = await redis.get(`cloudshop:session:${token}`);
+  if (!userId) return null;
+  const [users] = await mysqlPool.query("SELECT id, email, name, created_at FROM users WHERE id = ?", [userId]);
+  return users[0] || null;
+}
+
+async function requireUser(request, response, next) {
+  try {
+    const user = await currentUser(request);
+    if (!user) {
+      response.status(401).json({ error: "authentication required" });
+      return;
+    }
+    request.user = user;
+    next();
+  } catch (error) {
+    next(error);
+  }
 }
 
 async function initializeDependencies() {
@@ -179,6 +268,141 @@ async function start() {
       response.end(await metricsRegistry.metrics());
     } catch (error) {
       next(error);
+    }
+  });
+
+  app.post("/api/auth/register", async (request, response, next) => {
+    try {
+      const email = typeof request.body.email === "string" ? request.body.email.trim().toLowerCase() : "";
+      const name = typeof request.body.name === "string" ? request.body.name.trim() : "";
+      const password = typeof request.body.password === "string" ? request.body.password : "";
+      if (!/^\S+@\S+\.\S+$/.test(email) || !name || name.length > 120 || password.length < 8) {
+        response.status(400).json({ error: "valid email, name, and password of at least 8 characters are required" });
+        return;
+      }
+      const [result] = await mysqlPool.query(
+        "INSERT INTO users (email, name, password_hash) VALUES (?, ?, ?)",
+        [email, name, hashPassword(password)]
+      );
+      response.status(201).json({ id: result.insertId, email, name });
+    } catch (error) {
+      if (error.code === "ER_DUP_ENTRY") {
+        response.status(409).json({ error: "email is already registered" });
+        return;
+      }
+      next(error);
+    }
+  });
+
+  app.post("/api/auth/login", async (request, response, next) => {
+    try {
+      const email = typeof request.body.email === "string" ? request.body.email.trim().toLowerCase() : "";
+      const password = typeof request.body.password === "string" ? request.body.password : "";
+      const [users] = await mysqlPool.query("SELECT id, email, name, password_hash FROM users WHERE email = ?", [email]);
+      if (users.length === 0 || !verifyPassword(password, users[0].password_hash)) {
+        response.status(401).json({ error: "invalid email or password" });
+        return;
+      }
+      const token = crypto.randomBytes(32).toString("hex");
+      await redis.setEx(`cloudshop:session:${token}`, sessionTtlSeconds, String(users[0].id));
+      response.setHeader("Set-Cookie", `${sessionCookie}=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Max-Age=${sessionTtlSeconds}; Path=/`);
+      response.status(200).json({ id: users[0].id, email: users[0].email, name: users[0].name });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/auth/logout", async (request, response, next) => {
+    try {
+      const token = cookies(request)[sessionCookie];
+      if (token) await redis.del(`cloudshop:session:${token}`);
+      response.setHeader("Set-Cookie", `${sessionCookie}=; HttpOnly; SameSite=Lax; Max-Age=0; Path=/`);
+      response.status(204).end();
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/auth/me", requireUser, (request, response) => {
+    response.status(200).json(request.user);
+  });
+
+  app.get("/api/cart", requireUser, async (request, response, next) => {
+    try {
+      const [items] = await mysqlPool.query(
+        "SELECT c.product_id AS productId, c.quantity, p.name, p.price, p.image_url AS imageUrl, p.stock FROM cart_items c JOIN products p ON p.id = c.product_id WHERE c.user_id = ? ORDER BY c.updated_at DESC",
+        [request.user.id]
+      );
+      response.status(200).json({ items, total: items.reduce((sum, item) => sum + Number(item.price) * item.quantity, 0) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.put("/api/cart/items/:productId", requireUser, async (request, response, next) => {
+    try {
+      const quantity = Number(request.body.quantity);
+      if (!Number.isInteger(quantity) || quantity < 0 || quantity > 1000000) {
+        response.status(400).json({ error: "quantity must be a whole number between 0 and 1000000" });
+        return;
+      }
+      if (quantity === 0) {
+        await mysqlPool.query("DELETE FROM cart_items WHERE user_id = ? AND product_id = ?", [request.user.id, request.params.productId]);
+      } else {
+        const [products] = await mysqlPool.query("SELECT id, stock FROM products WHERE id = ?", [request.params.productId]);
+        if (products.length === 0) {
+          response.status(404).json({ error: "product not found" });
+          return;
+        }
+        if (quantity > products[0].stock) {
+          response.status(409).json({ error: "quantity exceeds available stock" });
+          return;
+        }
+        await mysqlPool.query(
+          "INSERT INTO cart_items (user_id, product_id, quantity) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE quantity = VALUES(quantity)",
+          [request.user.id, request.params.productId, quantity]
+        );
+      }
+      response.status(204).end();
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/orders", requireUser, async (request, response, next) => {
+    let connection;
+    try {
+      connection = await mysqlPool.getConnection();
+      await connection.beginTransaction();
+      const [items] = await connection.query(
+        "SELECT c.product_id AS productId, c.quantity, p.name, p.price, p.stock FROM cart_items c JOIN products p ON p.id = c.product_id WHERE c.user_id = ? FOR UPDATE",
+        [request.user.id]
+      );
+      if (items.length === 0) {
+        await connection.rollback();
+        response.status(400).json({ error: "cart is empty" });
+        return;
+      }
+      if (items.some((item) => item.quantity > item.stock)) {
+        await connection.rollback();
+        response.status(409).json({ error: "one or more products no longer have enough stock" });
+        return;
+      }
+      const total = items.reduce((sum, item) => sum + Number(item.price) * item.quantity, 0);
+      const [order] = await connection.query("INSERT INTO orders (user_id, total) VALUES (?, ?)", [request.user.id, total]);
+      for (const item of items) {
+        await connection.query("INSERT INTO order_items (order_id, product_id, product_name, unit_price, quantity) VALUES (?, ?, ?, ?, ?)", [order.insertId, item.productId, item.name, item.price, item.quantity]);
+        await connection.query("UPDATE products SET stock = stock - ? WHERE id = ?", [item.quantity, item.productId]);
+      }
+      await connection.query("DELETE FROM cart_items WHERE user_id = ?", [request.user.id]);
+      await connection.commit();
+      await clearProductsCache();
+      response.status(201).json({ id: order.insertId, status: "pending_payment", total });
+    } catch (error) {
+      if (connection) await connection.rollback();
+      next(error);
+    } finally {
+      if (connection) connection.release();
     }
   });
 
