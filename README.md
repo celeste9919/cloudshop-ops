@@ -100,6 +100,10 @@ REDIS_PASSWORD=<runtime-secret>
 | `GET` | `/api/cart` | 获取当前用户购物车 |
 | `PUT` | `/api/cart/items/:productId` | 设置购物车商品数量 |
 | `POST` | `/api/orders` | 将购物车转换为待支付订单并扣减库存 |
+| `GET` | `/api/orders` | 获取当前用户订单 |
+| `GET` | `/api/orders/:id` | 获取当前用户订单详情 |
+| `POST` | `/api/orders/:id/cancel` | 取消待支付订单并恢复库存 |
+| `GET` | `/api/admin/orders` | 管理员查看全部订单 |
 | `GET` | `/healthz` | 进程健康检查 |
 | `GET` | `/readyz` | MySQL 和 Redis 就绪检查 |
 | `GET` | `/metrics` | Prometheus 指标 |

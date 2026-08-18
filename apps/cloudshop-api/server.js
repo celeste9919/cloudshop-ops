@@ -431,6 +431,81 @@ async function start() {
     }
   });
 
+  app.get("/api/orders", requireUser, async (request, response, next) => {
+    try {
+      const [orders] = await mysqlPool.query(
+        "SELECT id, status, total, created_at AS createdAt FROM orders WHERE user_id = ? ORDER BY id DESC",
+        [request.user.id]
+      );
+      response.status(200).json({ orders });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/orders/:id", requireUser, async (request, response, next) => {
+    try {
+      const [orders] = await mysqlPool.query(
+        "SELECT id, user_id AS userId, status, total, created_at AS createdAt FROM orders WHERE id = ? AND user_id = ?",
+        [request.params.id, request.user.id]
+      );
+      if (orders.length === 0) {
+        response.status(404).json({ error: "order not found" });
+        return;
+      }
+      const [items] = await mysqlPool.query(
+        "SELECT product_id AS productId, product_name AS productName, unit_price AS unitPrice, quantity FROM order_items WHERE order_id = ? ORDER BY id",
+        [request.params.id]
+      );
+      response.status(200).json({ ...orders[0], items });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/orders/:id/cancel", requireUser, async (request, response, next) => {
+    let connection;
+    try {
+      connection = await mysqlPool.getConnection();
+      await connection.beginTransaction();
+      const [orders] = await connection.query("SELECT id, status FROM orders WHERE id = ? AND user_id = ? FOR UPDATE", [request.params.id, request.user.id]);
+      if (orders.length === 0) {
+        await connection.rollback();
+        response.status(404).json({ error: "order not found" });
+        return;
+      }
+      if (orders[0].status !== "pending_payment") {
+        await connection.rollback();
+        response.status(409).json({ error: "only pending payment orders can be cancelled" });
+        return;
+      }
+      const [items] = await connection.query("SELECT product_id, quantity FROM order_items WHERE order_id = ?", [request.params.id]);
+      for (const item of items) {
+        await connection.query("UPDATE products SET stock = stock + ? WHERE id = ?", [item.quantity, item.product_id]);
+      }
+      await connection.query("UPDATE orders SET status = 'cancelled' WHERE id = ?", [request.params.id]);
+      await connection.commit();
+      await clearProductsCache();
+      response.status(200).json({ id: Number(request.params.id), status: "cancelled" });
+    } catch (error) {
+      if (connection) await connection.rollback();
+      next(error);
+    } finally {
+      if (connection) connection.release();
+    }
+  });
+
+  app.get("/api/admin/orders", requireAdmin, async (_request, response, next) => {
+    try {
+      const [orders] = await mysqlPool.query(
+        "SELECT o.id, o.status, o.total, o.created_at AS createdAt, u.email, u.name FROM orders o JOIN users u ON u.id = o.user_id ORDER BY o.id DESC"
+      );
+      response.status(200).json({ orders });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.get("/api/products", async (request, response, next) => {
     try {
       const category = typeof request.query.category === "string" ? request.query.category.trim() : "";
